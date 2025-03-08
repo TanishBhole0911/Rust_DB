@@ -1,51 +1,3 @@
-// mod db;
-// use db::Database;
-// use std::io::{self, Write};
-
-// fn main() {
-//     let mut db = Database::new("./db.txt").expect("Failed to load database");
-
-//     println!("Welcome to RustDB!");
-//     loop {
-//         print!("> ");
-//         io::stdout().flush().unwrap();
-
-//         let mut input = String::new();
-//         io::stdin().read_line(&mut input).unwrap();
-//         let command: Vec<&str> = input.trim().split_whitespace().collect();
-
-//         if command.is_empty() {
-//             continue;
-//         }
-
-//         match command[0].to_uppercase().as_str() {
-//             "SET" if command.len() == 3 => {
-//                 db.set(command[1], command[2]);
-//                 println!("OK");
-//             }
-//             "GET" if command.len() == 2 => {
-//                 match db.get(command[1]) {
-//                     Some(value) => println!("{}", value),
-//                     None => println!("(nil)"),
-//                 }
-//             }
-//             "DELETE" if command.len() == 2 => {
-//                 if db.delete(command[1]) {
-//                     println!("Deleted");
-//                 } else {
-//                     println!("Key not found");
-//                 }
-//             }
-//             "EXIT" => {
-//                 db.save().expect("Failed to save database");
-//                 println!("Bye!");
-//                 break;
-//             }
-//             _ => println!("Unknown command"),
-//         }
-//     }
-// }
-
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Write, BufReader, BufRead, BufWriter};
@@ -57,17 +9,14 @@ struct Memtable {
 
 impl Memtable {
     fn new() -> Self {
-        println!("Creating new Memtable");
         Self { data: BTreeMap::new() }
     }
 
     fn insert(&mut self, key: String, value: String) {
-        println!("Inserting key: {}, value: {} into Memtable", key, value);
         self.data.insert(key, value);
     }
 
     fn get(&self, key: &str) -> Option<&String> {
-        println!("Getting value for key: {} from Memtable", key);
         self.data.get(key)
     }
 
@@ -83,7 +32,6 @@ struct WAL {
 
 impl WAL {
     fn new(path: &str) -> Self {
-        println!("Creating new WAL at path: {}", path);
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -93,12 +41,10 @@ impl WAL {
     }
 
     fn log(&mut self, key: &str, value: &str) {
-        println!("Logging key: {}, value: {} to WAL", key, value);
         writeln!(self.file, "{}:{}", key, value).unwrap();
     }
 
     fn read_logs(path: &str) -> Vec<(String, String)> {
-        println!("Reading logs from WAL at path: {}", path);
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
         reader.lines()
@@ -117,7 +63,6 @@ impl WAL {
 
 /// **SSTables (On-Disk Storage)**
 fn flush_to_sstable(memtable: &Memtable, path: &str) {
-    println!("Flushing Memtable to SSTable at path: {}", path);
     let mut file = File::create(path).unwrap();
     for (key, value) in &memtable.data {
         writeln!(file, "{}:{}", key, value).unwrap();
@@ -125,7 +70,6 @@ fn flush_to_sstable(memtable: &Memtable, path: &str) {
 }
 
 fn read_sstable(path: &str, key: &str) -> Option<String> {
-    println!("Reading SSTable at path: {} for key: {}", path, key);
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -143,10 +87,9 @@ fn read_sstable(path: &str, key: &str) -> Option<String> {
 
 /// **Compaction (Merge SSTables)**
 fn compact_sstables(sstable_paths: Vec<&str>, output_path: &str) {
-    println!("Compacting SSTables: {:?} into {}", sstable_paths, output_path);
     let mut merged_data = BTreeMap::new();
 
-    for path in sstable_paths.clone() {
+    for path in sstable_paths {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
 
@@ -180,14 +123,12 @@ struct LSMTree {
 
 impl LSMTree {
     fn new(wal_path: &str, sstable_path: &str, threshold: usize) -> Self {
-        println!("Creating new LSMTree with WAL: {}, SSTable: {}, Threshold: {}", wal_path, sstable_path, threshold);
         let wal = WAL::new(wal_path);
         let memtable = Memtable::new();
         Self { memtable, wal, sstable_path: sstable_path.to_string(), threshold }
     }
 
     fn insert(&mut self, key: String, value: String) {
-        println!("Inserting key: {}, value: {} into LSMTree", key, value);
         self.wal.log(&key, &value);
         self.memtable.insert(key, value);
         
@@ -198,7 +139,6 @@ impl LSMTree {
     }
 
     fn get(&self, key: &str) -> Option<String> {
-        println!("Getting value for key: {} from LSMTree", key);
         if let Some(value) = self.memtable.get(key) {
             return Some(value.clone());
         }
@@ -208,8 +148,6 @@ impl LSMTree {
 
 /// **Test the LSM Tree**
 fn main() {
-    println!("Starting LSM Tree Test");
-
     let mut lsm = LSMTree::new("wal.log", "sstable.txt", 5);
 
     // Insert some data
