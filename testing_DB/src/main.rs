@@ -1,8 +1,7 @@
-//// filepath: c:\Users\srija\Documents\GitHub\Rust_DB\DB\src\main.rs
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{File, OpenOptions};     // <-- Add OpenOptions here
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write, BufWriter};
-use std::path::Path;                  // <-- Add Path here
+// use std::path::Path;
 
 /// A Table stores a set of columns and a mapping of row IDs to (column, value) data.
 /// - `columns` tracks which columns exist in this table.
