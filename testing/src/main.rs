@@ -1,13 +1,15 @@
 #[warn(unused_imports)]
 use std::fs;
-use std::path::Path;
+// use std::path::Path;
 mod commands;
+const FOLDER_PATH: &str = "./src/commands";
+use commands::{command1, command2};
 
 
-
-fn main() {
-    let folder_path = "./src/commands"; // Change this to your folder path
-    let mut com = vec![];
+fn get_command_names()-> Vec<String> {
+    let folder_path = FOLDER_PATH;
+    let mut files = vec![];
+    let mut file_name = String::new();
 
     // Read the contents of the directory
     match fs::read_dir(folder_path) {
@@ -19,7 +21,8 @@ fn main() {
                         let path = entry.path();
                         if path.extension() == Some(std::ffi::OsStr::new("rs")) && path.file_name() != Some(std::ffi::OsStr::new("mod.rs")) {
                             println!("{:?}", path.file_name().unwrap());
-                            com.push()
+                            file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+                            files.push(file_name.split(".").next().unwrap().to_string());
                         }
                     }
                     Err(e) => eprintln!("Error reading entry: {}", e),
@@ -28,6 +31,21 @@ fn main() {
         }
         Err(e) => eprintln!("Error reading directory: {}", e),
     }
-    println!("{:?}", com);
+    println!("{:?}", files);
+    return files;
+}
+
+
+
+
+fn main() {
+    let x = get_command_names();
+    print!("{:?}", x);
+    let command1 = command1::command1::new();
+    command1.printing();
+    let command2 = command2::command2::new();
+    command2.printing();
+    
     
 }
+
