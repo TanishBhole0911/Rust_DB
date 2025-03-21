@@ -1,9 +1,13 @@
 #[warn(unused_imports)]
 use std::fs;
+
+pub mod table;
+
+
 // use std::path::Path;
 mod commands;
 const FOLDER_PATH: &str = "./src/commands";
-use commands::{command1, command2};
+use commands::{command1, command2, db};
 
 
 fn get_command_names()-> Vec<String> {
@@ -37,15 +41,19 @@ fn get_command_names()-> Vec<String> {
 
 
 
-
 fn main() {
+    let mut db = db::Database::new();
+
+
     let x = get_command_names();
     print!("{:?}", x);
-    let command1 = command1::command1::new();
-    command1.printing();
-    let command2 = command2::command2::new();
-    command2.printing();
-    
-    
+    let mut Create_Table = command1::Create_Table::new();
+    // Create_Table.printing();
+    Create_Table.create_table("table1", &mut db);
+    Create_Table.create_table_with_columns("table2", vec!["column1", "column2"], &mut db);
+    let mut Save_table = command2::Save_table::new();
+    // Save_table.printing();
+    Save_table.save_table("table2", "table1.csv", &mut db);
+    Create_Table.save_table("table1", "table11.csv", &mut db);
 }
 

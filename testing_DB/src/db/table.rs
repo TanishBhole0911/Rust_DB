@@ -41,7 +41,6 @@ impl Table {
     pub fn get_row(&self, row_id: &str) -> Option<&HashMap<String, String>> {
         self.rows.get(row_id)
     }
-
     /// Delete a specific row by row_id.
     pub fn delete_row(&mut self, row_id: &str) -> bool {
         self.rows.remove(row_id).is_some()
