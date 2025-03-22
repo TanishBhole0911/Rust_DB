@@ -1,6 +1,6 @@
 #[warn(unused_imports)]
 use std::fs;
-
+use env_logger;
 pub mod table;
 
 
@@ -42,18 +42,19 @@ fn get_command_names()-> Vec<String> {
 
 
 fn main() {
+    env_logger::init();
     let mut db = db::Database::new();
 
 
     let x = get_command_names();
     print!("{:?}", x);
-    let mut Create_Table = command1::Create_Table::new();
+    let mut create_table = command1::Create_Table::new();
     // Create_Table.printing();
-    Create_Table.create_table("table1", &mut db);
-    Create_Table.create_table_with_columns("table2", vec!["column1", "column2"], &mut db);
-    let mut Save_table = command2::Save_table::new();
+    create_table.create_table("table1", &mut db);
+    create_table.create_table_with_columns("table2", vec!["column1", "column2"], &mut db);
+    let mut save_table = command2::Save_table::new();
     // Save_table.printing();
-    Save_table.save_table("table2", "table1.csv", &mut db);
-    Create_Table.save_table("table1", "table11.csv", &mut db);
+    save_table.save_table("table2", "table1.csv", &mut db);
+    create_table.save_table("table1", "table11.csv", &mut db);
 }
 
