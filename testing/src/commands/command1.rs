@@ -53,14 +53,4 @@ impl Create_Table{
             super::db::Result::Err(err) => Result::Err(err.to_string()),
         };
     }
-
-    pub fn save_table(&mut self, t_name: &str, file_name: &str, db: &mut Database) -> () {
-        self.res_message = match db.save_table(t_name, file_name) {
-            super::db::Result::Ok(val) => {
-                println!("Table '{}' saved to '{}'.", t_name, file_name);
-                Result::Ok(val.join(", "))
-            },
-            super::db::Result::Err(err) => Result::Err(err.to_string()),
-        };
-    }
 }

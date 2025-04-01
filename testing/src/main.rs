@@ -55,6 +55,5 @@ fn main() {
     let mut save_table = command2::Save_table::new();
     // Save_table.printing();
     save_table.save_table("table2", "table1.csv", &mut db);
-    create_table.save_table("table1", "table11.csv", &mut db);
 }
 
