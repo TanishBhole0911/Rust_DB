@@ -63,11 +63,10 @@ fn main() {
 
         // db_lock.create_table("users").unwrap();
         // db_lock.flush_wal().unwrap();
-    
+
         // db_lock.add_column("users", "name").unwrap();
         // db_lock.add_column("users", "age").unwrap();
         // db_lock.add_column("users", "email").unwrap();
-        
 
         let mut row_data = std::collections::HashMap::new();
         row_data.insert("name".to_string(), "yes".to_string());
@@ -75,12 +74,11 @@ fn main() {
         row_data.insert("email".to_string(), "xyz@.com".to_string());
 
         // db_lock.insert_row("users", "1", row_data).unwrap();
-        
+
         // db_lock.save_table("users", "users.csv").unwrap();
 
         db_lock.update_row("users", "4", "age", "10").unwrap();
         db_lock.update_row("users", "2", "email", "y@.com").unwrap();
-
 
         match db_lock.get_row("users", "1") {
             Ok(row) => println!("Row: {:?}", row),
@@ -104,7 +102,6 @@ fn main() {
         // Optionally, perform a manual commit here if needed:
         // db_lock.flush_wal().unwrap();
         db_lock.commit_wal().unwrap();
-
     }
 
     // Run for a finite duration then exit.
