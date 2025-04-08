@@ -23,28 +23,24 @@ impl WalEngine {
             loop {
                 {
                     let mut db = db_clone.lock().unwrap();
-
-                    // Persist the WAL (append mode)
+                    // Persist the working WAL.
                     if let Err(e) = db.persist_wal() {
                         error!("Failed to persist WAL: {}", e);
                     } else {
                         info!("WAL persisted successfully.");
                     }
-
-                    // Replay the WAL (update in‑memory state)
+                    // Replay the WAL to update in-memory state.
                     if let Err(e) = db.replay_wal() {
                         error!("Failed to replay WAL: {}", e);
                     } else {
                         info!("WAL replayed successfully.");
                     }
-
-                    // Optionally, clear the in‑memory WAL if desired.
-                    // Commented out here so that the log file keeps growing.
-                    // if let Err(e) = db.clear_wal() {
-                    //     error!("Failed to clear WAL: {}", e);
-                    // } else {
-                    //     info!("WAL cleared successfully.");
-                    // }
+                    // Now commit the WAL: archive the logged operations and clear the working log.
+                    if let Err(e) = db.commit_wal() {
+                        error!("Failed to commit WAL: {}", e);
+                    } else {
+                        info!("WAL commit completed.");
+                    }
                 }
                 thread::sleep(interval);
             }

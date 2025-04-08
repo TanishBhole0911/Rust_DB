@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 
+#[derive(Debug)]
 pub struct Table {
     pub columns: HashSet<String>,  // List of allowed column names
     pub rows: BTreeMap<String, HashMap<String, String>>, // row_id -> { column_name -> value }
@@ -56,5 +58,39 @@ impl Table {
 
     pub fn get_table(&self) -> &BTreeMap<String, HashMap<String, String>> {
         &self.rows
+    }
+}
+
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Sort columns for predictable order
+        let mut cols: Vec<&String> = self.columns.iter().collect();
+        cols.sort();
+        
+        // Write header row
+        write!(f, "{:<10}", "Row ID")?;
+        for col in &cols {
+            write!(f, " | {:<15}", col)?;
+        }
+        writeln!(f)?;
+        writeln!(f, "{}", "-".repeat(10 + cols.len() * 18))?;
+        
+        // Write each row sorted by row_id
+        let mut row_ids: Vec<&String> = self.rows.keys().collect();
+        row_ids.sort();
+        for row_id in row_ids {
+            write!(f, "{:<10}", row_id)?;
+            for col in &cols {
+                let value = self
+                    .rows
+                    .get(row_id)
+                    .and_then(|r| r.get(col.as_str()))
+                    .cloned()
+                    .unwrap_or_default();
+                write!(f, " | {:<15}", value)?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }
