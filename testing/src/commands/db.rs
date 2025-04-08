@@ -237,21 +237,16 @@ impl Database {
         }
         // Now the table should be in memory.
         if let Some(table) = self.tables.get_mut(table_name) {
-            // Retrieve the entire row data.
-            if let Some(existing_row) = table.rows.get(row_id).cloned() {
-                // Optionally add the column to the table if not present.
-                if !table.columns.contains(&column_name.to_string()) {
-                    table.add_column(column_name);
-                    println!("Column '{}' was added to table '{}'", column_name, table_name);
-                }
-                // Remove the original row.
-                table.rows.remove(row_id);
-                // Create updated row data.
-                let mut updated_row = existing_row.clone();
-                updated_row.insert(column_name.to_string(), new_value.to_string());
-                // Insert the updated row in place of the old row.
-                table.insert_row(row_id, updated_row);
-                // Log the update
+            // Ensure the column exists; add it if not.
+            if !table.columns.contains(&column_name.to_string()) {
+                table.add_column(column_name);
+                println!("Column '{}' was added to table '{}'", column_name, table_name);
+            }
+            if let Some(row) = table.rows.get_mut(row_id) {
+                // Update the row in place.
+                row.insert(column_name.to_string(), new_value.to_string());
+                
+                // Log the update operation in the WAL.
                 let op = format!(
                     "update_row:{}:{}:{}:{}",
                     table_name,
@@ -261,7 +256,7 @@ impl Database {
                 );
                 self.wal.push(op);
                 println!("Updated row '{}' in table '{}', column '{}' set to '{}'.", row_id, table_name, column_name, new_value);
-    
+                self.save_table(table_name, &format!("{}.csv", table_name))?;
                 self.operations_since_save += 1;
                 if self.operations_since_save >= self.save_threshold {
                     let file_name = format!("{}.csv", table_name);
@@ -317,6 +312,96 @@ impl Database {
                 error!("Table '{}' does not exist.", table_name);
                 Err(DatabaseError::TableDoesNotExist(table_name.to_string()))
             }
+        }
+    }
+
+    pub fn get_table(&self, table_name: &str) -> Result<&Table> {
+        self.tables.get(table_name).ok_or(DatabaseError::TableDoesNotExist(table_name.to_string()))
+    }
+
+    /// Finds rows by the given column having a specific value.
+    /// Returns a vector of tuples: (table_name, row_id, row_data).
+    /// If `return_many` is false, stops at the first match.
+    pub fn find_rows_by_value_in_table(&self, table_name: &str, column: &str, value: &str, return_many: bool) -> Result<Vec<(String, HashMap<String, String>)>> {
+        if let Some(table) = self.tables.get(table_name) {
+            let mut results = Vec::new();
+            for (row_id, row_data) in &table.rows {
+                if let Some(v) = row_data.get(column) {
+                    if v == value {
+                        results.push((row_id.clone(), row_data.clone()));
+                        if !return_many {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(results)
+        } else {
+            Err(DatabaseError::TableDoesNotExist(table_name.to_string()))
+        }
+    }
+
+
+    /// Searches rows by a simple condition.
+    /// The condition should be in the format "column operator value", e.g., "age > 10" or "name == Alice".
+    /// Supported operators: "==", ">", "<", ">=", "<=".
+    /// Returns a vector of tuples: (table_name, row_id, row_data) for rows matching the condition.
+    pub fn search_rows_by_condition_in_table(&self, table_name: &str, condition: &str) -> Result<Vec<(String, HashMap<String, String>)>> {
+        if let Some(table) = self.tables.get(table_name) {
+            let parts: Vec<&str> = condition.split_whitespace().collect();
+            if parts.len() != 3 {
+                println!("Condition format invalid. Expected format: \"column operator value\"");
+                return Ok(Vec::new());
+            }
+            let col = parts[0];
+            let operator = parts[1];
+            let cond_value = parts[2];
+            let mut results = Vec::new();
+            for (row_id, row_data) in &table.rows {
+                if let Some(val) = row_data.get(col) {
+                    let condition_met = match operator {
+                        "==" => val == cond_value,
+                        ">" => {
+                            if let (Ok(num_val), Ok(num_cond)) = (val.parse::<f64>(), cond_value.parse::<f64>()) {
+                                num_val > num_cond
+                            } else {
+                                val.as_str() > cond_value
+                            }
+                        },
+                        "<" => {
+                            if let (Ok(num_val), Ok(num_cond)) = (val.parse::<f64>(), cond_value.parse::<f64>()) {
+                                num_val < num_cond
+                            } else {
+                                val.as_str() < cond_value
+                            }
+                        },
+                        ">=" => {
+                            if let (Ok(num_val), Ok(num_cond)) = (val.parse::<f64>(), cond_value.parse::<f64>()) {
+                                num_val >= num_cond
+                            } else {
+                                val.as_str() >= cond_value
+                            }
+                        },
+                        "<=" => {
+                            if let (Ok(num_val), Ok(num_cond)) = (val.parse::<f64>(), cond_value.parse::<f64>()) {
+                                num_val <= num_cond
+                            } else {
+                                val.as_str() <= cond_value
+                            }
+                        },
+                        _ => {
+                            println!("Unsupported operator: {}", operator);
+                            false
+                        }
+                    };
+                    if condition_met {
+                        results.push((row_id.clone(), row_data.clone()));
+                    }
+                }
+            }
+            Ok(results)
+        } else {
+            Err(DatabaseError::TableDoesNotExist(table_name.to_string()))
         }
     }
 

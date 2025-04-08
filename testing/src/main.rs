@@ -8,6 +8,7 @@ mod commands;
 const FOLDER_PATH: &str = "./src/commands";
 use commands::{command1, command2, db, walengine};
 
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,6 +77,27 @@ fn main() {
 
         db_lock.update_row("users", "4", "age", "10").unwrap();
         db_lock.update_row("users", "2", "email", "y@.com").unwrap();
+
+
+        match db_lock.get_row("users", "1") {
+            Ok(row) => println!("Row: {:?}", row),
+            Err(e) => eprintln!("Error: {}", e),
+        }
+
+        match db_lock.get_table("users") {
+            Ok(table) => println!("Table: {}", table),
+            Err(e) => eprintln!("Error: {}", e),
+        }
+
+        match db_lock.search_rows_by_condition_in_table("users", "age < 10") {
+            Ok(rows) => println!("Rows: {:?}", rows),
+            Err(e) => eprintln!("Error: {}", e),
+        }
+
+        match db_lock.find_rows_by_value_in_table("users", "age", "5", false) {
+            Ok(rows) => println!("Rows: {:?}", rows),
+            Err(e) => eprintln!("Error: {}", e),
+        }
         // Optionally, perform a manual commit here if needed:
         // db_lock.flush_wal().unwrap();
         db_lock.commit_wal().unwrap();
