@@ -86,7 +86,7 @@ fn test_entire_db(db: &mut db::Database, num_rows: usize) {
 }
 
 fn main() {
-    env_logger::init();
+    // env_logger::init();
 
     // Initialize the database wrapped in Arc<Mutex<>>
     let db = Arc::new(Mutex::new(db::Database::new()));
@@ -180,6 +180,14 @@ fn main() {
         // // // db_lock.flush_wal().unwrap();
         // // db_lock.commit_wal().unwrap();
     }
+
+    // New function calls for timed random insertions and search.
+    insert_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
 
     // Run for a finite duration then exit.
     thread::sleep(Duration::from_secs(60));
