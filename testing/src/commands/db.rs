@@ -1,5 +1,8 @@
 //// filepath: c:\Users\srija\Documents\GitHub\Rust_DB\testing\src\commands\db.rs
+use crate::commands::BloomFilter;
+use crate::commands::Indexer;
 use crate::table::table::Table;
+use crate::walwriter;
 use log::{error, info};
 use serde_json;
 use std::collections::HashMap;
@@ -7,6 +10,7 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -21,6 +25,10 @@ pub enum DatabaseError {
     RowNotFound(String, String),
     #[error("Error creating file '{0}': {1}")]
     FileCreationError(String, String),
+    #[error("datatype error")]
+    DataTypeError,
+    #[error("Invalid datatype provided.")]
+    InvalidDataType,
 }
 
 pub type Result<T> = std::result::Result<T, DatabaseError>;
@@ -31,6 +39,12 @@ pub struct Database {
     pub save_threshold: usize,
     pub wal: Vec<String>,
     pub wal_file: String,
+    pub datatypes: Vec<String>,
+    pub saved_row_count: usize,
+    pub wal_writer: Option<walwriter::WalWriter>,
+
+    pub indexer: Option<Indexer::Indexer>,
+    pub bloom_filter: Option<BloomFilter::BloomFilter>,
 }
 
 impl Database {
@@ -41,7 +55,49 @@ impl Database {
             save_threshold: 5,
             wal: Vec::new(),
             wal_file: "wal.log".to_string(),
+            datatypes: vec![
+                "int".to_string(),
+                "float".to_string(),
+                "string".to_string(),
+                "bool".to_string(),
+            ],
+            wal_writer: None,
+            saved_row_count: 0,
+
+            indexer: None,
+            bloom_filter: None,
         }
+    }
+
+    /// Build indexes (for example, index the "name" column of every row).
+    pub fn build_indexes(&mut self) {
+        // For simplicity, we build one global index on the "name" column.
+        let mut idx = Indexer::Indexer::new();
+        for (table_name, table) in self.tables.iter() {
+            for (row_id, row_data) in table.rows.iter() {
+                if let Some(value) = row_data.get("name") {
+                    // You could also include table_name in your key if needed.
+                    idx.add(value, row_id);
+                }
+            }
+        }
+        self.indexer = Some(idx);
+        info!("Indexes built.");
+    }
+
+    /// Build bloom filter (for instance, for fast lookups on the "email" column).
+    pub fn build_bloom_filter(&mut self) {
+        // Create a bloom filter of fixed size.
+        let mut bf = crate::commands::BloomFilter::BloomFilter::new(1000);
+        for (_table_name, table) in self.tables.iter() {
+            for (_row_id, row_data) in table.rows.iter() {
+                if let Some(email) = row_data.get("email") {
+                    bf.add(email);
+                }
+            }
+        }
+        self.bloom_filter = Some(bf);
+        info!("Bloom filter built.");
     }
 
     pub fn check_table(&self, table_name: &str) -> bool {
@@ -128,7 +184,12 @@ impl Database {
         if let Some(table) = self.tables.get_mut(table_name) {
             table.add_column(column_name);
             let op = format!("add_column:{}:{}", table_name, column_name);
-            self.wal.push(op.clone());
+            // self.wal.push(op);
+            if let Some(ref writer) = self.wal_writer {
+                writer.log(op);
+            } else {
+                self.wal.push(op);
+            }
             println!(
                 "Column '{}' added to table '{}' and logged to WAL",
                 column_name, table_name
@@ -141,6 +202,93 @@ impl Database {
             );
             Err(DatabaseError::TableDoesNotExist(table_name.to_string()))
         }
+    }
+
+    #[allow(dead_code)]
+    fn valid_datatype(dt: &str) -> bool {
+        match dt {
+            "int" | "float" | "string" => true,
+            _ => false,
+        }
+    }
+    #[allow(dead_code)]
+    fn check_value_matches(value: &str, dtype: &str) -> bool {
+        match dtype {
+            "int" => value.parse::<i64>().is_ok(),
+            "float" => value.parse::<f64>().is_ok(),
+            "bool" => {
+                let lower = value.to_lowercase();
+                lower == "true" || lower == "false"
+            }
+            "string" => true,
+            _ => false,
+        }
+    }
+    #[allow(dead_code)]
+    fn is_subset_vec_str(&self, a: &Vec<&str>) -> bool {
+        a.iter().all(|&dt| self.datatypes.contains(&dt.to_string()))
+    }
+    pub fn add_columns(
+        &mut self,
+        table_name: &str,
+        column_names: Vec<&str>,
+        datatypes: Vec<&str>,
+    ) -> Result<Vec<Vec<String>>> {
+        if column_names.len() != datatypes.len() {
+            error!("Column names and datatypes must have the same length.");
+            return Err(DatabaseError::DataTypeError);
+        }
+
+        if !self.check_table(table_name) {
+            // Table not found: try to load it from file.
+            let file_name = format!("{}.csv", table_name);
+            if fs::metadata(&file_name).is_ok() {
+                match self.load_table_from_file(table_name, &file_name) {
+                    Ok(_) => println!("Table '{}' loaded from file '{}'.", table_name, file_name),
+                    Err(e) => {
+                        error!("Failed to load table from file: {}", e);
+                        return Err(e);
+                    }
+                }
+            } else {
+                error!(
+                    "Table '{}' does not exist in memory or on disk.",
+                    table_name
+                );
+                return Err(DatabaseError::TableDoesNotExist(table_name.to_string()));
+            }
+        }
+        if Database::is_subset_vec_str(self, &datatypes) == false {
+            error!("Invalid datatypes provided.");
+            return Err(DatabaseError::InvalidDataType);
+        }
+
+        let mut results = Vec::new();
+
+        // Add the new columns.
+        for col in column_names.iter() {
+            match self.add_column(table_name, col) {
+                Ok(res) => results.push(res),
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Insert a single new row that contains the datatypes for each new column.
+        let mut data = HashMap::new();
+        let table = self
+            .tables
+            .get_mut(table_name)
+            .ok_or(DatabaseError::TableDoesNotExist(table_name.to_string()))?;
+        for (col, dt) in column_names.iter().zip(datatypes.iter()) {
+            data.insert(col.to_string(), dt.to_string());
+            table.add_datatype(col, dt);
+        }
+        match self.insert_row(table_name, "datatypes", data) {
+            Ok(res) => results.push(res),
+            Err(e) => return Err(e),
+        }
+
+        Ok(results)
     }
 
     // Get row from table.
@@ -212,6 +360,22 @@ impl Database {
                 return Err(DatabaseError::TableDoesNotExist(table_name.to_string()));
             }
         }
+
+        // //check for datatype
+        // for (col, val) in &data {
+        //     if let Some(table) = self.tables.get(table_name) {
+        //         if let Some(dt) = table.row_datatypes.get(col) {
+        //             if !Database::check_value_matches(val, dt) {
+        //                 error!("Value '{}' does not match datatype '{}' for column '{}'.", val, dt, col);
+        //                 return Err(DatabaseError::DataTypeError);
+        //             }
+        //         } else {
+        //             error!("Column '{}' not found in table '{}'.", col, table_name);
+        //             return Err(DatabaseError::RowDoesNotExist(row_id.to_string(), table_name.to_string()));
+        //         }
+        //     }
+        // }
+
         // Now perform the row insertion.
         if let Some(table) = self.tables.get_mut(table_name) {
             table.insert_row(row_id, data.clone());
@@ -221,7 +385,12 @@ impl Database {
                 row_id,
                 serde_json::to_string(&data).unwrap()
             );
-            self.wal.push(op);
+            // self.wal.push(op);
+            if let Some(ref writer) = self.wal_writer {
+                writer.log(op);
+            } else {
+                self.wal.push(op);
+            }
             println!(
                 "Inserted row '{}' in table '{}' and logged to WAL",
                 row_id, table_name
@@ -230,7 +399,7 @@ impl Database {
             self.operations_since_save += 1;
             if self.operations_since_save >= self.save_threshold {
                 let file_name = format!("{}.csv", table_name);
-                if let Err(e) = self.save_table(table_name, &file_name) {
+                if let Err(e) = self.save_table_for_insert(table_name, &file_name) {
                     error!("Failed to save table '{}': {}", table_name, e);
                 }
                 self.operations_since_save = 0;
@@ -245,6 +414,67 @@ impl Database {
         }
     }
 
+    pub fn insert_row_with_datatype(
+        &mut self,
+        table_name: &str,
+        row_id: &str,
+        data: HashMap<String, String>,
+    ) -> Result<Vec<Vec<String>>> {
+        if !self.check_table(table_name) {
+            // Table not found: try to load it from file.
+            let file_name = format!("{}.csv", table_name);
+            if fs::metadata(&file_name).is_ok() {
+                match self.load_table_from_file(table_name, &file_name) {
+                    Ok(_) => println!("Table '{}' loaded from file '{}'.", table_name, file_name),
+                    Err(e) => {
+                        error!("Failed to load table from file: {}", e);
+                        return Err(e);
+                    }
+                }
+            } else {
+                error!(
+                    "Table '{}' does not exist in memory or on disk.",
+                    table_name
+                );
+                return Err(DatabaseError::TableDoesNotExist(table_name.to_string()));
+            }
+        }
+        let table = self
+            .tables
+            .get_mut(table_name)
+            .ok_or(DatabaseError::TableDoesNotExist(table_name.to_string()))?;
+        //check if the row_id already exists
+        if let Some(existing_row) = table.get_row(row_id) {
+            error!("Row '{}' already exists in table '{}'.", row_id, table_name);
+            return Err(DatabaseError::RowDoesNotExist(
+                row_id.to_string(),
+                table_name.to_string(),
+            ));
+        }
+
+        //check for datatype
+        for (col, val) in &data {
+            if let Some(dt) = table.row_datatypes.get(col) {
+                if !Database::check_value_matches(val, dt) {
+                    error!(
+                        "Value '{}' does not match datatype '{}' for column '{}'.",
+                        val, dt, col
+                    );
+                    return Err(DatabaseError::DataTypeError);
+                }
+            } else {
+                error!("Column '{}' not found in table '{}'.", col, table_name);
+                return Err(DatabaseError::RowDoesNotExist(
+                    row_id.to_string(),
+                    table_name.to_string(),
+                ));
+            }
+        }
+        // Now perform the row insertion.
+        let result = self.insert_row(table_name, row_id, data)?;
+        Ok(vec![result])
+    }
+
     // Update a value in a row for a specific column.
     pub fn update_row(
         &mut self,
@@ -253,7 +483,6 @@ impl Database {
         column_name: &str,
         new_value: &str,
     ) -> Result<Vec<String>> {
-        // Ensure the table is in memory, loading from file if needed.
         if !self.check_table(table_name) {
             let file_name = format!("{}.csv", table_name);
             if fs::metadata(&file_name).is_ok() {
@@ -294,7 +523,12 @@ impl Database {
                     column_name,
                     serde_json::to_string(new_value).unwrap()
                 );
-                self.wal.push(op);
+                // self.wal.push(op);
+                if let Some(ref writer) = self.wal_writer {
+                    writer.log(op);
+                } else {
+                    self.wal.push(op);
+                }
                 println!(
                     "Updated row '{}' in table '{}', column '{}' set to '{}'.",
                     row_id, table_name, column_name, new_value
@@ -329,23 +563,111 @@ impl Database {
         }
     }
 
+    pub fn save_table_for_insert(
+        &mut self,
+        table_name: &str,
+        file_name: &str,
+    ) -> Result<Vec<String>> {
+        if let Some(table) = self.tables.get(table_name) {
+            // Get columns sorted.
+            let mut columns_in_order: Vec<_> = table.columns.iter().cloned().collect();
+            columns_in_order.sort();
+
+            let path = Path::new(file_name);
+            let mut writer: BufWriter<Box<dyn Write>>;
+
+            if path.exists() {
+                // Open in append mode.
+                let file = OpenOptions::new()
+                    .append(true)
+                    .open(file_name)
+                    .map_err(|e| {
+                        DatabaseError::FileCreationError(file_name.to_string(), e.to_string())
+                    })?;
+                writer = BufWriter::new(Box::new(file));
+            } else {
+                // Create new file and write header.
+                let file = File::create(file_name).map_err(|e| {
+                    DatabaseError::FileCreationError(file_name.to_string(), e.to_string())
+                })?;
+                writer = BufWriter::new(Box::new(file));
+                let header = {
+                    let mut hdr = vec!["row_id".to_string()];
+                    hdr.extend(columns_in_order.iter().cloned());
+                    hdr.join(",")
+                };
+                writeln!(writer, "{}", header).unwrap();
+            }
+
+            // Get only the unsaved rows.
+            let unsaved_rows: Vec<(&String, &HashMap<String, String>)> = table
+                .rows
+                .iter()
+                .skip(self.saved_row_count)
+                .filter(|(row_id, _)| *row_id != "datatypes")
+                .collect();
+
+            for (row_id, row_data) in unsaved_rows.iter() {
+                let mut row_vec = vec![(*row_id).clone()];
+                for col in &columns_in_order {
+                    row_vec.push(row_data.get(col).cloned().unwrap_or_default());
+                }
+                writeln!(writer, "{}", row_vec.join(",")).unwrap();
+            }
+            writer.flush().unwrap();
+
+            // Update the saved row count.
+            self.saved_row_count = table.rows.len();
+            println!(
+                "Table '{}' appended to '{}' with {} new rows.",
+                table_name,
+                file_name,
+                unsaved_rows.len()
+            );
+            Ok(vec![table_name.to_string(), file_name.to_string()])
+        } else {
+            error!("Table '{}' does not exist.", table_name);
+            Err(DatabaseError::TableDoesNotExist(table_name.to_string()))
+        }
+    }
+
     // Save the table to a CSV file.
     pub fn save_table(&self, table_name: &str, file_name: &str) -> Result<Vec<String>> {
         match self.tables.get(table_name) {
             Some(table) => {
+                // Get columns sorted.
                 let mut columns_in_order: Vec<_> = table.columns.iter().cloned().collect();
                 columns_in_order.sort();
+
                 let file_result = File::create(file_name);
                 match file_result {
                     Ok(file) => {
                         let mut writer = BufWriter::new(file);
+                        // Write header.
                         let header = {
                             let mut hdr = vec!["row_id".to_string()];
                             hdr.extend(columns_in_order.iter().cloned());
                             hdr.join(",")
                         };
                         writeln!(writer, "{}", header).unwrap();
-                        for (row_id, row_data) in &table.rows {
+
+                        // If a "datatypes" row exists, write it as the second row.
+                        if let Some(datatype_row) = table.rows.get("datatypes") {
+                            let mut row_vec = vec!["datatypes".to_string()];
+                            for col in &columns_in_order {
+                                row_vec.push(datatype_row.get(col).cloned().unwrap_or_default());
+                            }
+                            writeln!(writer, "{}", row_vec.join(",")).unwrap();
+                        }
+
+                        // Write all other rows (exclude "datatypes").
+                        let mut rows: Vec<_> = table
+                            .rows
+                            .iter()
+                            .filter(|(row_id, _)| *row_id != "datatypes")
+                            .collect();
+                        rows.sort_by_key(|(row_id, _)| row_id.to_string());
+                        for (row_id, row_data) in rows {
                             let mut row_vec = vec![row_id.clone()];
                             for col in &columns_in_order {
                                 row_vec.push(row_data.get(col).cloned().unwrap_or_default());
@@ -387,10 +709,41 @@ impl Database {
         value: &str,
         return_many: bool,
     ) -> Result<Vec<(String, HashMap<String, String>)>> {
+        // If we're searching on a column that we index (e.g., "name"),
+        // use the indexer instead of scanning every row.
+        if let Some(ref indexer) = self.indexer {
+            // Assume that our indexer indexes the column we're interested in.
+            if let Some(row_ids) = indexer.get(value) {
+                if let Some(table) = self.tables.get(table_name) {
+                    let mut results = Vec::new();
+                    for row_id in row_ids {
+                        if let Some(row) = table.rows.get(row_id) {
+                            results.push((row_id.clone(), row.clone()));
+                            if !return_many {
+                                break;
+                            }
+                        }
+                    }
+                    return Ok(results);
+                } else {
+                    return Err(DatabaseError::TableDoesNotExist(table_name.to_string()));
+                }
+            }
+        }
+        // For columns not indexed or when index miss occurs, use the full scan.
         if let Some(table) = self.tables.get(table_name) {
             let mut results = Vec::new();
             for (row_id, row_data) in &table.rows {
                 if let Some(v) = row_data.get(column) {
+                    // If a BloomFilter is available for this column,
+                    // check it to quickly rule out non-existent values.
+                    if column == "email" {
+                        if let Some(ref bf) = self.bloom_filter {
+                            if !bf.contains(v) {
+                                continue;
+                            }
+                        }
+                    }
                     if v == value {
                         results.push((row_id.clone(), row_data.clone()));
                         if !return_many {
@@ -609,18 +962,26 @@ impl Database {
 
     // load_wal() reads existing WAL operations from disk.
     pub fn load_wal(&mut self) -> Result<()> {
-        let file = File::open(&self.wal_file);
-        if let Ok(file) = file {
-            let reader = std::io::BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(entry) = line {
-                    self.wal.push(entry);
+        let file = File::open(&self.wal_file)
+            .map_err(|e| DatabaseError::FileCreationError(self.wal_file.clone(), e.to_string()))?;
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let ln = line.map_err(|e| {
+                DatabaseError::FileCreationError(self.wal_file.clone(), e.to_string())
+            })?;
+            if !ln.trim().is_empty() {
+                match serde_json::from_str::<HashMap<String, String>>(&ln) {
+                    Ok(row_data) => {
+                        // Process the row_data.
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to deserialize row data for table 'test_table': {}",
+                            e
+                        );
+                    }
                 }
             }
-            // Replay loaded WAL to update in‑memory state.
-            self.flush_wal()?;
-        } else {
-            println!("No WAL file found. Starting fresh.");
         }
         Ok(())
     }
