@@ -8,10 +8,12 @@ mod commands;
 const FOLDER_PATH: &str = "./src/commands";
 use commands::{command1, command2, db, walengine};
 
+use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
 //Not Neccesary
 fn get_command_names() -> Vec<String> {
     let folder_path = FOLDER_PATH;
@@ -36,7 +38,7 @@ fn get_command_names() -> Vec<String> {
 }
 
 fn main() {
-    env_logger::init();
+    // env_logger::init();
 
     // Initialize the database wrapped in Arc<Mutex<>>
     let db = Arc::new(Mutex::new(db::Database::new()));
@@ -104,8 +106,65 @@ fn main() {
         db_lock.commit_wal().unwrap();
     }
 
+    // New function calls for timed random insertions and search.
+    insert_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+    search_random_entries_timed(&db);
+
     // Run for a finite duration then exit.
     thread::sleep(Duration::from_secs(60));
     running.store(false, Ordering::SeqCst);
     println!("Shutting down.");
+}
+
+// New function: Inserts 500 random rows and prints the total duration.
+fn insert_random_entries_timed(db: &Arc<Mutex<db::Database>>) {
+    let mut rng = thread_rng();
+    let count = 500;
+    let start = Instant::now();
+    for _ in 0..count {
+        let random_id = rng.gen_range(10000..99999);
+        let random_age = rng.gen_range(1..100);
+        let random_name = format!("User{}", random_id);
+        let mut row_data = std::collections::HashMap::new();
+        row_data.insert("name".to_string(), random_name);
+        row_data.insert("age".to_string(), random_age.to_string());
+        row_data.insert(
+            "email".to_string(),
+            format!("user{}@example.com", random_id),
+        );
+        let _ = db
+            .lock()
+            .unwrap()
+            .insert_row("users", &random_id.to_string(), row_data);
+    }
+    let duration = start.elapsed();
+    println!("Inserted {} random entries in {:?}", count, duration);
+}
+
+// New function: Searches for rows matching a random condition and times the search.
+fn search_random_entries_timed(db: &Arc<Mutex<db::Database>>) {
+    let mut rng = thread_rng();
+    let threshold = rng.gen_range(10..50);
+    let condition = format!("age < {}", threshold);
+    let start = Instant::now();
+    match db
+        .lock()
+        .unwrap()
+        .search_rows_by_condition_in_table("users", &condition)
+    {
+        Ok(rows) => {
+            let duration = start.elapsed();
+            println!(
+                "Search condition [{}] returned {} rows in {:?}",
+                condition,
+                rows.len(),
+                duration
+            );
+        }
+        Err(e) => eprintln!("Error searching rows: {}", e),
+    }
 }
