@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub struct Table {
-    pub columns: HashSet<String>,  // List of allowed column names
+    pub columns: HashSet<String>, // List of allowed column names
     pub rows: BTreeMap<String, HashMap<String, String>>, // row_id -> { column_name -> value }
     pub row_datatypes: HashMap<String, String>, // column_name -> datatype
 }
@@ -22,14 +22,14 @@ impl Table {
         self.columns.insert(column_name.to_string());
     }
 
-
     pub fn add_datatype(&mut self, column_name: &str, datatype: &str) {
         if self.row_datatypes.contains_key(column_name) {
             println!(" - already exists");
             return;
         }
         println!("Adding datatype {} to column {}", datatype, column_name);
-        self.row_datatypes.insert(column_name.to_string(), datatype.to_string());
+        self.row_datatypes
+            .insert(column_name.to_string(), datatype.to_string());
     }
 
     /// Insert or update a row with (column -> value) pairs; restrict columns to those known in `columns`.
@@ -78,7 +78,7 @@ impl fmt::Display for Table {
         // Sort columns for predictable order
         let mut cols: Vec<&String> = self.columns.iter().collect();
         cols.sort();
-        
+
         // Write header row
         write!(f, "{:<10}", "Row ID")?;
         for col in &cols {
@@ -86,7 +86,7 @@ impl fmt::Display for Table {
         }
         writeln!(f)?;
         writeln!(f, "{}", "-".repeat(10 + cols.len() * 18))?;
-        
+
         // Write each row sorted by row_id
         let mut row_ids: Vec<&String> = self.rows.keys().collect();
         row_ids.sort();

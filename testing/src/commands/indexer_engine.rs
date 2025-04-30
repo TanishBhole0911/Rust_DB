@@ -1,6 +1,6 @@
+use crate::commands::db::Database;
 use crate::commands::BloomFilter;
 use crate::commands::Indexer;
-use crate::db::Database;
 use log::{error, info};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -17,7 +17,7 @@ impl IndexEngine {
     }
 
     pub fn start(self) {
-        let db_clone = Arc::clone(&self.db);
+        let db_clone: Arc<Mutex<Database>> = Arc::clone(&self.db);
         let interval = self.interval;
         thread::spawn(move || {
             loop {

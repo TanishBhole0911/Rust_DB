@@ -1,8 +1,8 @@
 //// filepath: c:\Users\srija\Documents\GitHub\Rust_DB\testing\src\commands\db.rs
+use crate::commands::walwriter;
 use crate::commands::BloomFilter;
 use crate::commands::Indexer;
 use crate::table::table::Table;
-use crate::walwriter;
 use log::{error, info};
 use serde_json;
 use std::collections::HashMap;
